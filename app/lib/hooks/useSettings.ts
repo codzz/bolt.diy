@@ -1,31 +1,27 @@
 import { useStore } from '@nanostores/react';
+import Cookies from 'js-cookie';
+import { useCallback, useEffect, useState } from 'react';
+import type { TabWindowConfig } from '~/components/@settings/core/types';
+import { getLocalStorage, setLocalStorage } from '~/lib/persistence';
+import { logStore } from '~/lib/stores/logs';
 import {
   isDebugMode,
   isEventLogsEnabled,
-  isLocalModelsEnabled,
-  LOCAL_PROVIDERS,
   promptStore,
   providersStore,
   latestBranchStore,
   autoSelectStarterTemplate,
   enableContextOptimizationStore,
   tabConfigurationStore,
-  updateTabConfiguration as updateTabConfig,
   resetTabConfiguration as resetTabConfig,
   updateProviderSettings as updateProviderSettingsStore,
   updateLatestBranch,
   updateAutoSelectTemplate,
   updateContextOptimization,
   updateEventLogs,
-  updateLocalModels,
   updatePromptId,
 } from '~/lib/stores/settings';
-import { useCallback, useEffect, useState } from 'react';
-import Cookies from 'js-cookie';
 import type { IProviderSetting, ProviderInfo, IProviderConfig } from '~/types/model';
-import type { TabWindowConfig, TabVisibilityConfig } from '~/components/@settings/core/types';
-import { logStore } from '~/lib/stores/logs';
-import { getLocalStorage, setLocalStorage } from '~/lib/persistence';
 
 export interface Settings {
   theme: 'light' | 'dark' | 'system';
@@ -49,8 +45,6 @@ export interface UseSettingsReturn {
   providers: Record<string, IProviderConfig>;
   activeProviders: ProviderInfo[];
   updateProviderSettings: (provider: string, config: IProviderSetting) => void;
-  isLocalModel: boolean;
-  enableLocalModels: (enabled: boolean) => void;
 
   // Debug and development settings
   debug: boolean;
@@ -67,7 +61,6 @@ export interface UseSettingsReturn {
 
   // Tab configuration
   tabConfiguration: TabWindowConfig;
-  updateTabConfiguration: (config: TabVisibilityConfig) => void;
   resetTabConfiguration: () => void;
 }
 
@@ -81,12 +74,12 @@ export function useSettings(): UseSettingsReturn {
   const debug = useStore(isDebugMode);
   const eventLogs = useStore(isEventLogsEnabled);
   const promptId = useStore(promptStore);
-  const isLocalModel = useStore(isLocalModelsEnabled);
   const isLatestBranch = useStore(latestBranchStore);
   const autoSelectTemplate = useStore(autoSelectStarterTemplate);
   const [activeProviders, setActiveProviders] = useState<ProviderInfo[]>([]);
   const contextOptimizationEnabled = useStore(enableContextOptimizationStore);
   const tabConfiguration = useStore(tabConfigurationStore);
+
   const [settings, setSettings] = useState<Settings>(() => {
     const storedSettings = getLocalStorage('settings');
     return {
@@ -100,16 +93,12 @@ export function useSettings(): UseSettingsReturn {
   });
 
   useEffect(() => {
-    let active = Object.entries(providers)
+    const active = Object.entries(providers)
       .filter(([_key, provider]) => provider.settings.enabled)
       .map(([_k, p]) => p);
 
-    if (!isLocalModel) {
-      active = active.filter((p) => !LOCAL_PROVIDERS.includes(p.name));
-    }
-
     setActiveProviders(active);
-  }, [providers, isLocalModel]);
+  }, [providers]);
 
   const saveSettings = useCallback((newSettings: Partial<Settings>) => {
     setSettings((prev) => {
@@ -133,11 +122,6 @@ export function useSettings(): UseSettingsReturn {
   const setEventLogs = useCallback((enabled: boolean) => {
     updateEventLogs(enabled);
     logStore.logSystem(`Event logs ${enabled ? 'enabled' : 'disabled'}`);
-  }, []);
-
-  const enableLocalModels = useCallback((enabled: boolean) => {
-    updateLocalModels(enabled);
-    logStore.logSystem(`Local models ${enabled ? 'enabled' : 'disabled'}`);
   }, []);
 
   const setPromptId = useCallback((id: string) => {
@@ -188,14 +172,11 @@ export function useSettings(): UseSettingsReturn {
     [saveSettings],
   );
 
-  // Fix the providers cookie sync
   useEffect(() => {
     const providers = providersStore.get();
-    const providerSetting: Record<string, { enabled: boolean }> = {};
+    const providerSetting: Record<string, IProviderSetting> = {}; // preserve the entire settings object for each provider
     Object.keys(providers).forEach((provider) => {
-      providerSetting[provider] = {
-        enabled: providers[provider].settings.enabled || false, // Add fallback for undefined
-      };
+      providerSetting[provider] = providers[provider].settings;
     });
     Cookies.set('providers', JSON.stringify(providerSetting));
   }, [providers]);
@@ -205,8 +186,6 @@ export function useSettings(): UseSettingsReturn {
     providers,
     activeProviders,
     updateProviderSettings,
-    isLocalModel,
-    enableLocalModels,
     debug,
     enableDebugMode,
     eventLogs,
@@ -225,7 +204,6 @@ export function useSettings(): UseSettingsReturn {
     setTimezone,
     settings,
     tabConfiguration,
-    updateTabConfiguration: updateTabConfig,
     resetTabConfiguration: resetTabConfig,
   };
 }

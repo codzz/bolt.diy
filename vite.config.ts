@@ -1,132 +1,280 @@
-import { cloudflareDevProxyVitePlugin as remixCloudflareDevProxy, vitePlugin as remixVitePlugin } from '@remix-run/dev';
+import { cloudflare } from '@cloudflare/vite-plugin';
+import { reactRouter } from '@react-router/dev/vite';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import UnoCSS from 'unocss/vite';
 import { defineConfig, type ViteDevServer } from 'vite';
-import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { optimizeCssModules } from 'vite-plugin-optimize-css-modules';
-import tsconfigPaths from 'vite-tsconfig-paths';
 import * as dotenv from 'dotenv';
-import { execSync } from 'child_process';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 
-dotenv.config();
+// Prevent miniflare from making an external network request to workers.cloudflare.com
+// for Request.cf during local dev, which causes 3-second TimeoutError warnings.
+process.env.CLOUDFLARE_CF_FETCH_ENABLED ??= 'false';
 
-// Get detailed git info with fallbacks
-const getGitInfo = () => {
-  try {
-    return {
-      commitHash: execSync('git rev-parse --short HEAD').toString().trim(),
-      branch: execSync('git rev-parse --abbrev-ref HEAD').toString().trim(),
-      commitTime: execSync('git log -1 --format=%cd').toString().trim(),
-      author: execSync('git log -1 --format=%an').toString().trim(),
-      email: execSync('git log -1 --format=%ae').toString().trim(),
-      remoteUrl: execSync('git config --get remote.origin.url').toString().trim(),
-      repoName: execSync('git config --get remote.origin.url')
-        .toString()
-        .trim()
-        .replace(/^.*github.com[:/]/, '')
-        .replace(/\.git$/, ''),
-    };
-  } catch {
-    return {
-      commitHash: 'no-git-info',
-      branch: 'unknown',
-      commitTime: 'unknown',
-      author: 'unknown',
-      email: 'unknown',
-      remoteUrl: 'unknown',
-      repoName: 'unknown',
-    };
-  }
-};
-
-// Read package.json with detailed dependency info
-const getPackageJson = () => {
-  try {
-    const pkgPath = join(process.cwd(), 'package.json');
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-
-    return {
-      name: pkg.name,
-      description: pkg.description,
-      license: pkg.license,
-      dependencies: pkg.dependencies || {},
-      devDependencies: pkg.devDependencies || {},
-      peerDependencies: pkg.peerDependencies || {},
-      optionalDependencies: pkg.optionalDependencies || {},
-    };
-  } catch {
-    return {
-      name: 'bolt.diy',
-      description: 'A DIY LLM interface',
-      license: 'MIT',
-      dependencies: {},
-      devDependencies: {},
-      peerDependencies: {},
-      optionalDependencies: {},
-    };
-  }
-};
-
-const pkg = getPackageJson();
-const gitInfo = getGitInfo();
+// Load environment variables without duplicate loading or console noise
+dotenv.config({ path: ['.env.local', '.env'], quiet: true });
 
 export default defineConfig((config) => {
   return {
     define: {
-      __COMMIT_HASH: JSON.stringify(gitInfo.commitHash),
-      __GIT_BRANCH: JSON.stringify(gitInfo.branch),
-      __GIT_COMMIT_TIME: JSON.stringify(gitInfo.commitTime),
-      __GIT_AUTHOR: JSON.stringify(gitInfo.author),
-      __GIT_EMAIL: JSON.stringify(gitInfo.email),
-      __GIT_REMOTE_URL: JSON.stringify(gitInfo.remoteUrl),
-      __GIT_REPO_NAME: JSON.stringify(gitInfo.repoName),
-      __APP_VERSION: JSON.stringify(process.env.npm_package_version),
-      __PKG_NAME: JSON.stringify(pkg.name),
-      __PKG_DESCRIPTION: JSON.stringify(pkg.description),
-      __PKG_LICENSE: JSON.stringify(pkg.license),
-      __PKG_DEPENDENCIES: JSON.stringify(pkg.dependencies),
-      __PKG_DEV_DEPENDENCIES: JSON.stringify(pkg.devDependencies),
-      __PKG_PEER_DEPENDENCIES: JSON.stringify(pkg.peerDependencies),
-      __PKG_OPTIONAL_DEPENDENCIES: JSON.stringify(pkg.optionalDependencies),
+      'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV),
+      // Ensure process.cwd is defined as a function for path-browserify compatibility
+      'process.cwd': '() => "/"',
+    },
+    resolve: {
+      tsconfigPaths: true,
     },
     build: {
       target: 'esnext',
     },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react/jsx-runtime',
+        'react/jsx-dev-runtime',
+        'react-dom',
+        'react-dom/client',
+        'react-router',
+        'remix-utils/client-only',
+        '@nanostores/react',
+        'nanostores',
+        'zustand',
+        'framer-motion',
+        'ai',
+        '@ai-sdk/react',
+        '@ai-sdk/amazon-bedrock',
+        '@ai-sdk/anthropic',
+        '@ai-sdk/cerebras',
+        '@ai-sdk/cohere',
+        '@ai-sdk/deepseek',
+        '@ai-sdk/fireworks',
+        '@ai-sdk/google',
+        '@ai-sdk/mistral',
+        '@ai-sdk/mcp',        // AI SDK 7 MCP integration
+        '@ai-sdk/openai',
+        '@openrouter/ai-sdk-provider',
+        'ollama-ai-provider-v2',
+        '@radix-ui/react-checkbox',
+        '@radix-ui/react-collapsible',
+        '@radix-ui/react-context-menu',
+        '@radix-ui/react-dialog',
+        '@radix-ui/react-dropdown-menu',
+        '@radix-ui/react-label',
+        '@radix-ui/react-popover',
+        '@radix-ui/react-scroll-area',
+        '@radix-ui/react-switch',
+        '@radix-ui/react-tabs',
+        '@radix-ui/react-tooltip',
+        'react-toastify',
+
+        'class-variance-authority',
+        'react-markdown',
+        'remark-gfm',
+        'rehype-raw',
+        'rehype-sanitize',
+        'unist-util-visit',
+        'shiki',
+        '@codemirror/autocomplete',
+        '@codemirror/commands',
+        '@codemirror/lang-cpp',
+        '@codemirror/lang-css',
+        '@codemirror/lang-html',
+        '@codemirror/lang-javascript',
+        '@codemirror/lang-json',
+        '@codemirror/lang-markdown',
+        '@codemirror/lang-python',
+        '@codemirror/lang-sass',
+        '@codemirror/lang-vue',
+        '@codemirror/lang-wast',
+        '@codemirror/language',
+        '@codemirror/search',
+        '@codemirror/state',
+        '@codemirror/view',
+        '@uiw/codemirror-theme-vscode',
+        '@xterm/xterm',
+        '@xterm/addon-fit',
+        '@xterm/addon-web-links',
+        '@webcontainer/api',
+        'diff',
+        'date-fns',
+        'js-cookie',
+        'jszip',
+        'file-saver',
+        'path-browserify',
+        'chart.js',
+        'react-chartjs-2',
+        'react-resizable-panels',
+        'react-dnd',
+        'react-dnd-html5-backend',
+        'react-window',
+        'react-qrcode-logo',
+        'isomorphic-git',
+        'isomorphic-git/http/web',
+        'istextorbinary',
+        'ignore',
+        'chalk',
+        'lucide-react',
+      ],
+    },
+    environments: {
+      client: {
+        /*
+         * React Router reads `build/client/.vite/manifest.json` while bundling the
+         * server build. Under `@cloudflare/vite-plugin` the server build runs in
+         * parallel with the client build, so the client manifest has to be
+         * requested explicitly or React Router fails with ENOENT.
+         */
+        build: { manifest: true },
+      },
+    },
     plugins: [
-      nodePolyfills({
-        include: ['path', 'buffer', 'process'],
-      }),
-      config.mode !== 'test' && remixCloudflareDevProxy(),
-      remixVitePlugin({
-        future: {
-          v3_fetcherPersist: true,
-          v3_relativeSplatPath: true,
-          v3_throwAbortReason: true,
-          v3_lazyRouteDiscovery: true,
-        },
-      }),
+      /*
+       * Browser polyfills for `Buffer` / `process` / `global`.
+       *
+       * This replaces `vite-plugin-node-polyfills`, which cannot be used here: its
+       * `config()` hook applies `optimizeDeps` and resolve aliases globally, and
+       * under `@cloudflare/vite-plugin` the `ssr` environment is evaluated inside
+       * workerd, where the plugin's CommonJS shims fail with
+       * `ReferenceError: module is not defined`. Remix v2 never hit this because
+       * its (now removed) Cloudflare dev proxy ran the SSR environment in Node.
+       *
+       * The worker does not need these: `nodejs_compat` in wrangler.jsonc provides
+       * the real Node builtins. Only the browser bundle needs shimming, so this is
+       * restricted to the client environment.
+       *
+       * The shims are imported from `vite-plugin-node-polyfills/shims/*` because
+       * those are real ESM builds with named exports; the underlying `buffer`
+       * package is CommonJS and exposes no named `Buffer` export.
+       */
+      browserPolyfills(),
+      config.mode !== 'test' && cloudflare({ viteEnvironment: { name: 'ssr' } }),
+      config.mode !== 'test' && reactRouter(),
       UnoCSS(),
-      tsconfigPaths(),
       chrome129IssuePlugin(),
       config.mode === 'production' && optimizeCssModules({ apply: 'build' }),
     ],
     envPrefix: [
       'VITE_',
       'OPENAI_LIKE_API_BASE_URL',
+      'OPENAI_LIKE_API_MODELS',
       'OLLAMA_API_BASE_URL',
       'LMSTUDIO_API_BASE_URL',
       'TOGETHER_API_BASE_URL',
     ],
-    css: {
-      preprocessorOptions: {
-        scss: {
-          api: 'modern-compiler',
-        },
+    test: {
+      globals: true,
+      environment: 'jsdom',
+      setupFiles: ['./tests/setup.ts'],
+      exclude: [
+        '**/node_modules/**',
+        '**/dist/**',
+        '**/cypress/**',
+        '**/.{idea,git,cache,output,temp}/**',
+        '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*',
+        '**/tests/preview/**', // Exclude preview tests that require Playwright
+        '**/tests/e2e/**', // Exclude e2e tests that require Playwright
+        'app/components/chat/Markdown.spec.ts', // Exclude - imports cause issues with import.meta.hot
+        'app/lib/stores/workbench.spec.ts', // Exclude - imports cause issues with import.meta.hot
+      ],
+      include: [
+        '**/*.{test,spec}.{ts,tsx,js,jsx}',
+        '**/tests/unit/**/*.{test,spec}.{ts,tsx,js,jsx}',
+        '**/tests/integration/**/*.{test,spec}.{ts,tsx,js,jsx}',
+        '**/tests/performance/**/*.perf.test.{ts,tsx,js,jsx}',
+      ],
+      benchmark: {
+        include: ['**/*.bench.{ts,tsx,js,jsx}', '**/tests/performance/**/*.bench.{ts,tsx,js,jsx}'],
+        exclude: ['**/node_modules/**', '**/dist/**'],
+      },
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'json', 'html'],
+        exclude: [
+          'node_modules/',
+          'tests/',
+          '**/*.test.{ts,tsx}',
+          '**/*.spec.{ts,tsx}',
+          '**/types.ts',
+          '**/*.d.ts',
+        ],
+      },
+      define: {
+        'import.meta.hot': 'undefined',
       },
     },
   };
 });
+
+/**
+ * `vite-plugin-node-polyfills` injects CommonJS shims that reference `module`.
+ *
+ * Under `@cloudflare/vite-plugin` the `ssr` environment is evaluated inside
+ * workerd (the Cloudflare runner Durable Object), where modules are ESM and there
+ * is no `module` binding — applying the plugin there fails the dev server with
+ * `ReferenceError: module is not defined`. Remix v2 never hit this because its
+ * (now removed) Cloudflare dev proxy ran the SSR environment in Node.
+ *
+ * The browser bundle still needs the shims, and the worker gets the real Node
+ * builtins from the `nodejs_compat` compatibility flag in wrangler.jsonc, so the
+ * plugin is restricted to the client environment.
+ */
+function browserPolyfills() {
+  const shims = 'vite-plugin-node-polyfills/shims';
+  const prelude = [
+    `import { Buffer as __boltBuffer } from '${shims}/buffer';`,
+    `import __boltProcess from '${shims}/process';`,
+    `globalThis.Buffer ??= __boltBuffer;`,
+    `globalThis.process ??= __boltProcess;`,
+    `globalThis.global ??= globalThis;`,
+  ].join('\n');
+
+  /* Only touch modules that actually reference one of the globals. */
+  const needsPolyfill = /(^|[^\w.$])(Buffer|process|global)([^\w$]|$)/;
+
+  /*
+   * Vite externalizes Node builtins for the browser before `resolve.alias` is
+   * applied ("Module 'buffer' has been externalized for browser compatibility"),
+   * so the mapping has to happen in `resolveId`. The replacement has to be an
+   * absolute path: returning a bare specifier makes the dev server request
+   * `/@id/vite-plugin-node-polyfills/shims/buffer`, which 404s.
+   */
+  const require = createRequire(import.meta.url);
+  const polyfillsRoot = dirname(dirname(require.resolve('vite-plugin-node-polyfills')));
+  const builtinAliases: Record<string, string> = {
+    'node:buffer': join(polyfillsRoot, 'shims', 'buffer', 'dist', 'index.js'),
+    buffer: join(polyfillsRoot, 'shims', 'buffer', 'dist', 'index.js'),
+    'node:process': join(polyfillsRoot, 'shims', 'process', 'dist', 'index.js'),
+    process: join(polyfillsRoot, 'shims', 'process', 'dist', 'index.js'),
+  };
+
+  return {
+    name: 'bolt-browser-polyfills',
+    enforce: 'pre',
+    applyToEnvironment(environment: { name: string }) {
+      return environment.name === 'client';
+    },
+    resolveId(source: string) {
+      return builtinAliases[source] ?? null;
+    },
+    transform(code: string, id: string) {
+      // Skip node_modules except for specific ones that need polyfills
+      if (id.includes('node_modules')) {
+        // Only inject polyfills for path-browserify and other packages that need them
+        if (!id.includes('path-browserify')) {
+          return null;
+        }
+      } else if (!/\.[cm]?[jt]sx?$/.test(id.split('?')[0])) {
+        return null;
+      }
+
+      if (!needsPolyfill.test(code)) {
+        return null;
+      }
+
+      return { code: `${prelude}\n${code}`, map: null };
+    },
+  };
+}
 
 function chrome129IssuePlugin() {
   return {

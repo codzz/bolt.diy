@@ -1,8 +1,10 @@
-import { type ActionFunctionArgs } from '@remix-run/cloudflare';
+import type { UIMessage } from 'ai';
+import type { ActionFunctionArgs } from 'react-router';
 import { streamText } from '~/lib/.server/llm/stream-text';
-import { stripIndents } from '~/utils/stripIndent';
-import type { ProviderInfo } from '~/types/model';
 import { getApiKeysFromCookie, getProviderSettingsFromCookie } from '~/lib/api/cookies';
+import { createMessage } from '~/lib/persistence/messageMigration';
+import type { ProviderInfo } from '~/types/model';
+import { stripIndents } from '~/utils/stripIndent';
 
 export async function action(args: ActionFunctionArgs) {
   return enhancerAction(args);
@@ -40,9 +42,9 @@ async function enhancerAction({ context, request }: ActionFunctionArgs) {
   try {
     const result = await streamText({
       messages: [
-        {
+        createMessage({
           role: 'user',
-          content:
+          text:
             `[Model: ${model}]\n\n[Provider: ${providerName}]\n\n` +
             stripIndents`
             You are a professional prompt engineer specializing in crafting precise, effective prompts.
@@ -72,20 +74,33 @@ async function enhancerAction({ context, request }: ActionFunctionArgs) {
               ${message}
             </original_prompt>
           `,
-        },
+        }) as unknown as Omit<UIMessage, 'id'>,
       ],
       env: context.cloudflare?.env as any,
       apiKeys,
       providerSettings,
+      options: {
+        system:
+          'You are a senior software principal architect, you should help the user analyse the user query and enrich it with the necessary context and constraints to make it more specific, actionable, and effective. You should also ensure that the prompt is self-contained and uses professional language. Your response should ONLY contain the enhanced prompt text. Do not include any explanations, metadata, or wrapper tags.',
+
+        /*
+         * onError: (event) => {
+         *   throw new Response(null, {
+         *     status: 500,
+         *     statusText: 'Internal Server Error',
+         *   });
+         * }
+         */
+      },
     });
 
+    // Return the text stream directly since it's already text data
     return new Response(result.textStream, {
       status: 200,
       headers: {
         'Content-Type': 'text/event-stream',
         Connection: 'keep-alive',
         'Cache-Control': 'no-cache',
-        'Text-Encoding': 'chunked',
       },
     });
   } catch (error: unknown) {

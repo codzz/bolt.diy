@@ -32,8 +32,15 @@ dist-ssr
 .wrangler
 _worker.bundle
 
+# react-router generated types
+.react-router
+
 Modelfile
 modelfiles
+
+# vite temp config files (contain absolute paths from the generating machine)
+vite.config.ts.timestamp-*.mjs
+vite.*.timestamp-*.mjs
 
 # docs ignore
 site
@@ -43,5 +50,7 @@ app/commit.json
 changelogUI.md
 docs/instructions/Roadmap.md
 .cursorrules
-.cursorrules
 *.md
+.qodo
+
+test-results/

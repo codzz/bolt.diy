@@ -1,15 +1,20 @@
+import type { UIMessage } from 'ai';
 import ignore from 'ignore';
-import { useGit } from '~/lib/hooks/useGit';
-import type { Message } from 'ai';
-import { detectProjectCommands, createCommandsMessage, escapeBoltTags } from '~/utils/projectCommands';
-import { generateId } from '~/utils/fileUtils';
+import { X, GitBranch } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'react-toastify';
-import { LoadingOverlay } from '~/components/ui/LoadingOverlay';
-import { RepositorySelectionDialog } from '~/components/@settings/tabs/connections/components/RepositorySelectionDialog';
-import { classNames } from '~/utils/classNames';
+
+// Import the new repository selector components
+import { GitHubRepositorySelector } from '~/components/@settings/tabs/github/components/GitHubRepositorySelector';
+import { GitLabRepositorySelector } from '~/components/@settings/tabs/gitlab/components/GitLabRepositorySelector';
 import { Button } from '~/components/ui/Button';
+import { LoadingOverlay } from '~/components/ui/LoadingOverlay';
+import { useGit } from '~/lib/hooks/useGit';
 import type { IChatMetadata } from '~/lib/persistence/db';
+import { createMessage } from '~/lib/persistence/messageMigration';
+import { classNames } from '~/utils/classNames';
+import { generateId } from '~/utils/fileUtils';
+import { detectProjectCommands, createCommandsMessage, escapeBoltTags } from '~/utils/projectCommands';
 
 const IGNORE_PATTERNS = [
   'node_modules/**',
@@ -27,7 +32,8 @@ const IGNORE_PATTERNS = [
   '**/npm-debug.log*',
   '**/yarn-debug.log*',
   '**/yarn-error.log*',
-  '**/*lock.json',
+
+  // Include this so npm install runs much faster '**/*lock.json',
   '**/*lock.yaml',
 ];
 
@@ -38,13 +44,14 @@ const MAX_TOTAL_SIZE = 500 * 1024; // 500KB total limit
 
 interface GitCloneButtonProps {
   className?: string;
-  importChat?: (description: string, messages: Message[], metadata?: IChatMetadata) => Promise<void>;
+  importChat?: (description: string, messages: UIMessage[], metadata?: IChatMetadata) => Promise<void>;
 }
 
 export default function GitCloneButton({ importChat, className }: GitCloneButtonProps) {
   const { ready, gitClone } = useGit();
   const [loading, setLoading] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<'github' | 'gitlab' | null>(null);
 
   const handleClone = async (repoUrl: string) => {
     if (!ready) {
@@ -52,6 +59,8 @@ export default function GitCloneButton({ importChat, className }: GitCloneButton
     }
 
     setLoading(true);
+    setIsDialogOpen(false);
+    setSelectedProvider(null);
 
     try {
       const { workdir, data } = await gitClone(repoUrl);
@@ -61,6 +70,7 @@ export default function GitCloneButton({ importChat, className }: GitCloneButton
         const textDecoder = new TextDecoder('utf-8');
 
         let totalSize = 0;
+
         const skippedFiles: string[] = [];
         const fileContents = [];
 
@@ -70,7 +80,7 @@ export default function GitCloneButton({ importChat, className }: GitCloneButton
           // Skip binary files
           if (
             content instanceof Uint8Array &&
-            !filePath.match(/\.(txt|md|js|jsx|ts|tsx|json|html|css|scss|less|yml|yaml|xml|svg)$/i)
+            !filePath.match(/\.(txt|md|astro|mjs|js|jsx|ts|tsx|json|html|css|scss|less|yml|yaml|xml|svg|vue|svelte)$/i)
           ) {
             skippedFiles.push(filePath);
             continue;
@@ -111,9 +121,10 @@ export default function GitCloneButton({ importChat, className }: GitCloneButton
         const commands = await detectProjectCommands(fileContents);
         const commandsMessage = createCommandsMessage(commands);
 
-        const filesMessage: Message = {
+        const filesMessage = createMessage({
           role: 'assistant',
-          content: `Cloning the repo ${repoUrl} into ${workdir}
+          id: generateId(),
+          text: `Cloning the repo ${repoUrl} into ${workdir}
 ${
   skippedFiles.length > 0
     ? `\nSkipped files (${skippedFiles.length}):
@@ -131,11 +142,9 @@ ${escapeBoltTags(file.content)}
   )
   .join('\n')}
 </boltArtifact>`,
-          id: generateId(),
-          createdAt: new Date(),
-        };
+        }) as UIMessage;
 
-        const messages = [filesMessage];
+        const messages: UIMessage[] = [filesMessage];
 
         if (commandsMessage) {
           messages.push(commandsMessage);
@@ -154,26 +163,160 @@ ${escapeBoltTags(file.content)}
   return (
     <>
       <Button
-        onClick={() => setIsDialogOpen(true)}
-        title="Clone a Git Repo"
-        variant="outline"
+        onClick={() => {
+          setSelectedProvider(null);
+          setIsDialogOpen(true);
+        }}
+        title="Clone a repo"
+        variant="default"
         size="lg"
         className={classNames(
-          'gap-2 bg-[#F5F5F5] dark:bg-[#252525]',
-          'text-bolt-elements-textPrimary dark:text-white',
-          'hover:bg-[#E5E5E5] dark:hover:bg-[#333333]',
-          'border-[#E5E5E5] dark:border-[#333333]',
+          'gap-2 bg-bolt-elements-background-depth-1',
+          'text-bolt-elements-textPrimary',
+          'hover:bg-bolt-elements-background-depth-2',
+          'border border-bolt-elements-borderColor',
           'h-10 px-4 py-2 min-w-[120px] justify-center',
           'transition-all duration-200 ease-in-out',
           className,
         )}
         disabled={!ready || loading}
       >
-        <span className="i-ph:git-branch w-4 h-4" />
-        Clone a Git Repo
+        <GitBranch className="w-4 h-4" />
+        Clone a repo
       </Button>
 
-      <RepositorySelectionDialog isOpen={isDialogOpen} onClose={() => setIsDialogOpen(false)} onSelect={handleClone} />
+      {/* Provider Selection Dialog */}
+      {isDialogOpen && !selectedProvider && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-950 rounded-xl shadow-xl border border-bolt-elements-borderColor dark:border-bolt-elements-borderColor max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-bolt-elements-textPrimary dark:text-bolt-elements-textPrimary">
+                  Choose Repository Provider
+                </h3>
+                <button
+                  onClick={() => setIsDialogOpen(false)}
+                  className="p-2 rounded-lg bg-transparent hover:bg-bolt-elements-background-depth-1 dark:hover:bg-bolt-elements-background-depth-1 text-bolt-elements-textSecondary dark:text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary dark:hover:text-bolt-elements-textPrimary transition-all duration-200 hover:scale-105 active:scale-95"
+                >
+                  <X className="w-5 h-5 transition-transform duration-200 hover:rotate-90" />
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <button
+                  onClick={() => setSelectedProvider('github')}
+                  className="w-full p-4 rounded-lg bg-bolt-elements-background-depth-1 dark:bg-bolt-elements-background-depth-1 hover:bg-bolt-elements-background-depth-2 dark:hover:bg-bolt-elements-background-depth-2 border border-bolt-elements-borderColor dark:border-bolt-elements-borderColor hover:border-bolt-elements-borderColorActive dark:hover:border-bolt-elements-borderColorActive transition-all duration-200 text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-500/10 dark:bg-blue-500/20 flex items-center justify-center group-hover:bg-blue-500/20 dark:group-hover:bg-blue-500/30 transition-colors">
+                      <GitBranch className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-bolt-elements-textPrimary dark:text-bolt-elements-textPrimary">
+                        GitHub
+                      </div>
+                      <div className="text-sm text-bolt-elements-textSecondary dark:text-bolt-elements-textSecondary">
+                        Clone from GitHub repositories
+                      </div>
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setSelectedProvider('gitlab')}
+                  className="w-full p-4 rounded-lg bg-bolt-elements-background-depth-1 dark:bg-bolt-elements-background-depth-1 hover:bg-bolt-elements-background-depth-2 dark:hover:bg-bolt-elements-background-depth-2 border border-bolt-elements-borderColor dark:border-bolt-elements-borderColor hover:border-bolt-elements-borderColorActive dark:hover:border-bolt-elements-borderColorActive transition-all duration-200 text-left group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-orange-500/10 dark:bg-orange-500/20 flex items-center justify-center group-hover:bg-orange-500/20 dark:group-hover:bg-orange-500/30 transition-colors">
+                      <GitBranch className="w-6 h-6 text-orange-600 dark:text-orange-400" />
+                    </div>
+                    <div>
+                      <div className="font-medium text-bolt-elements-textPrimary dark:text-bolt-elements-textPrimary">
+                        GitLab
+                      </div>
+                      <div className="text-sm text-bolt-elements-textSecondary dark:text-bolt-elements-textSecondary">
+                        Clone from GitLab repositories
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GitHub Repository Selection */}
+      {isDialogOpen && selectedProvider === 'github' && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-950 rounded-xl shadow-xl border border-bolt-elements-borderColor dark:border-bolt-elements-borderColor w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b border-bolt-elements-borderColor dark:border-bolt-elements-borderColor flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-500/10 dark:bg-blue-500/20 flex items-center justify-center">
+                  <GitBranch className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-bolt-elements-textPrimary dark:text-bolt-elements-textPrimary">
+                    Import GitHub Repository
+                  </h3>
+                  <p className="text-sm text-bolt-elements-textSecondary dark:text-bolt-elements-textSecondary">
+                    Clone a repository from GitHub to your workspace
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsDialogOpen(false);
+                  setSelectedProvider(null);
+                }}
+                className="p-2 rounded-lg bg-transparent hover:bg-bolt-elements-background-depth-1 dark:hover:bg-bolt-elements-background-depth-1 text-bolt-elements-textSecondary dark:text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary dark:hover:text-bolt-elements-textPrimary transition-all duration-200 hover:scale-105 active:scale-95"
+              >
+                <X className="w-5 h-5 transition-transform duration-200 hover:rotate-90" />
+              </button>
+            </div>
+
+            <div className="p-6 max-h-[calc(90vh-140px)] overflow-y-auto">
+              <GitHubRepositorySelector onClone={handleClone} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GitLab Repository Selection */}
+      {isDialogOpen && selectedProvider === 'gitlab' && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-950 rounded-xl shadow-xl border border-bolt-elements-borderColor dark:border-bolt-elements-borderColor w-full max-w-4xl max-h-[90vh] overflow-hidden">
+            <div className="p-6 border-b border-bolt-elements-borderColor dark:border-bolt-elements-borderColor flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-orange-500/10 dark:bg-orange-500/20 flex items-center justify-center">
+                  <GitBranch className="w-6 h-6 text-orange-600 dark:text-orange-400" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-bolt-elements-textPrimary dark:text-bolt-elements-textPrimary">
+                    Import GitLab Repository
+                  </h3>
+                  <p className="text-sm text-bolt-elements-textSecondary dark:text-bolt-elements-textSecondary">
+                    Clone a repository from GitLab to your workspace
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setIsDialogOpen(false);
+                  setSelectedProvider(null);
+                }}
+                className="p-2 rounded-lg bg-transparent hover:bg-bolt-elements-background-depth-1 dark:hover:bg-bolt-elements-background-depth-1 text-bolt-elements-textSecondary dark:text-bolt-elements-textSecondary hover:text-bolt-elements-textPrimary dark:hover:text-bolt-elements-textPrimary transition-all duration-200 hover:scale-105 active:scale-95"
+              >
+                <X className="w-5 h-5 transition-transform duration-200 hover:rotate-90" />
+              </button>
+            </div>
+
+            <div className="p-6 max-h-[calc(90vh-140px)] overflow-y-auto">
+              <GitLabRepositorySelector onClone={handleClone} />
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading && <LoadingOverlay message="Please wait while we clone the repository..." />}
     </>
